@@ -12,7 +12,7 @@ Alpine Linux 3.18 VM running PostgreSQL 15 via Vagrant + QEMU (Apple Silicon com
 
 - 2 CPU cores, 4 GB RAM
 - Alpine Linux 3.18 (ARM64)
-- PostgreSQL 15
+- PostgreSQL 15 (SSL enabled, self-signed cert)
 
 ## Usage
 
@@ -38,7 +38,7 @@ Database: defaultdb
 Connection string:
 
 ```
-postgresql://staging:12345678@localhost:5432/defaultdb
+postgresql://staging:12345678@localhost:5432/defaultdb?sslmode=require
 ```
 
 CLI:

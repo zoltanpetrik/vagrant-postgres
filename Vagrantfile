@@ -20,16 +20,38 @@ Vagrant.configure("2") do |config|
     set -e
 
     apk update
-    apk add postgresql postgresql-client
+    apk add postgresql postgresql-client openssl
 
     # Start the service (auto-initializes the cluster)
     rc-update add postgresql default > /dev/null
     rc-service postgresql start 2>/dev/null
 
+    # Alpine reads config from /etc/postgresql, not the data directory
+    PG_CONF="/etc/postgresql/postgresql.conf"
+    PG_DATA=$(sudo -u postgres psql -tAc "SHOW data_directory;")
+    PG_HBA="$PG_DATA/pg_hba.conf"
+
     # Configure PostgreSQL to accept remote connections
-    PG_DATA=$(find /var/lib/postgresql -name postgresql.conf -path "*/data/*" | head -1 | xargs dirname)
-    sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" "$PG_DATA/postgresql.conf"
-    echo "host all all 0.0.0.0/0 md5" >> "$PG_DATA/pg_hba.conf"
+    sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" "$PG_CONF"
+
+    # Generate self-signed SSL cert in the data directory
+    openssl req -new -x509 -days 3650 -nodes \
+      -subj "/CN=pg-dev" \
+      -keyout "$PG_DATA/server.key" \
+      -out "$PG_DATA/server.crt" 2>/dev/null
+    chown postgres:postgres "$PG_DATA/server.key" "$PG_DATA/server.crt"
+    chmod 600 "$PG_DATA/server.key"
+    chmod 644 "$PG_DATA/server.crt"
+
+    # Enable SSL
+    cat >> "$PG_CONF" <<EOF
+ssl = on
+ssl_cert_file = '$PG_DATA/server.crt'
+ssl_key_file = '$PG_DATA/server.key'
+EOF
+
+    # Require SSL for remote connections
+    echo "hostssl all all 0.0.0.0/0 md5" >> "$PG_HBA"
     rc-service postgresql restart 2>/dev/null
 
     # Create user, database
@@ -46,11 +68,12 @@ Vagrant.configure("2") do |config|
       echo "Restore complete."
     fi
 
-    echo "PostgreSQL is ready."
+    echo "PostgreSQL is ready (SSL enabled)."
     echo "  Host:     localhost:5432"
     echo "  User:     staging"
     echo "  Password: 12345678"
     echo "  Database: defaultdb"
+    echo "  SSL:      on (self-signed, use sslmode=require)"
   SHELL
 
   # Open SSH tunnel for PostgreSQL port forwarding (runs in background)
