@@ -96,6 +96,7 @@ EOF
     t.name = "Dumping PostgreSQL database to host..."
     t.ruby do |env, machine|
       info = machine.ssh_info
+      next if info.nil?
       Dir.mkdir("db") unless Dir.exist?("db")
       system("ssh -p #{info[:port]} " \
              "-i #{info[:private_key_path].first} " \
