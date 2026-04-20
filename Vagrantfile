@@ -15,6 +15,17 @@ Vagrant.configure("2") do |config|
   # Shared folder for DB dump persistence (QEMU provider uses rsync)
   config.vm.synced_folder "./db", "/vagrant/db", create: true, type: "rsync"
 
+  # Keep guest clock in sync with host RTC (QEMU on macOS freezes the guest
+  # system clock during host sleep; hwclock is resynced by QEMU on resume).
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+    (crontab -l 2>/dev/null | grep -v 'hwclock --hctosys'; \
+     echo '* * * * * /sbin/hwclock --hctosys') | crontab -
+    rc-update add crond default > /dev/null
+    rc-service crond start 2>/dev/null || rc-service crond restart
+    hwclock --hctosys
+  SHELL
+
   # Provision PostgreSQL
   config.vm.provision "shell", inline: <<-SHELL
     set -e
