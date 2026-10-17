@@ -90,15 +90,39 @@ Vagrant.configure("2") do |config|
     end
   end
 
-  # Keep guest clock in sync with host RTC (QEMU on macOS freezes the guest
-  # system clock during host sleep; hwclock is resynced by QEMU on resume).
-  config.vm.provision "shell", inline: <<-SHELL
+  # QEMU on Apple Silicon stops the guest clock while the Mac sleeps; see
+  # "Guest Clock" in the README. chrony steps the clock whenever it is more than
+  # a second off (makestep 1 -1) and checks its servers every 64 s (maxpoll 6),
+  # so the guest should be right again within about a minute of a wake. The
+  # image's rtcsync is left out: its 11-minute copy of the guest clock into the
+  # hardware clock, which follows the Mac's, could write a stale time there.
+  # The other lines match the image's default.
+  # Named so `vagrant provision --provision-with clock` can apply it alone.
+  config.vm.provision "clock", type: "shell", inline: <<-SHELL
     set -e
-    (crontab -l 2>/dev/null | grep -v 'hwclock --hctosys'; \
-     echo '* * * * * /sbin/hwclock --hctosys') | crontab -
-    rc-update add crond default > /dev/null
-    rc-service crond start 2>/dev/null || rc-service crond restart
-    hwclock --hctosys
+    rc-service chronyd stop
+    cat > /etc/chrony/chrony.conf <<EOF
+# Written by the Vagrantfile provisioner; re-provisioning overwrites it.
+confdir /etc/chrony/conf.d
+pool pool.ntp.org iburst maxpoll 6
+sourcedir /etc/chrony/sources.d
+driftfile /var/lib/chrony/chrony.drift
+ntsdumpdir /var/lib/chrony
+logdir /var/log/chrony
+maxupdateskew 100.0
+makestep 1 -1
+cmdport 0
+EOF
+    # chronyd starts at the rate saved in its drift file, which may have been
+    # learned under another configuration
+    rm -f /var/lib/chrony/chrony.drift
+    # A per-minute `hwclock --hctosys` cron job, which existing VMs may have,
+    # sets the clock back to the hardware clock's whole second and fights chrony
+    if crontab -l 2>/dev/null | grep -q 'hwclock --hctosys'; then
+      crontab -l | grep -v 'hwclock --hctosys' | crontab -
+    fi
+    rc-update add chronyd default > /dev/null
+    rc-service chronyd start
   SHELL
 
   # Provision PostgreSQL
